@@ -1,0 +1,35 @@
+name: Instagram 自動投稿（4時間ごと）
+
+on:
+  schedule:
+    # UTC時間で4時間ごとに実行
+    # 0時・4時・8時・12時・16時・20時（UTC）= 9時・13時・17時・21時・1時・5時（JST）
+    - cron: '0 0,4,8,12,16,20 * * *'
+
+  # 手動実行ボタン（テスト用）
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存ライブラリをインストール
+        run: |
+          pip install feedparser requests beautifulsoup4 pillow
+
+      - name: Instagram 自動投稿を実行
+        env:
+          META_ACCESS_TOKEN:    ${{ secrets.META_ACCESS_TOKEN }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          IMGBB_API_KEY:        ${{ secrets.IMGBB_API_KEY }}
+        run: python main.py

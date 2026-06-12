@@ -3,23 +3,17 @@
 GitHub Actions で4時間ごとに自動実行されます。
 """
 
-import os
 import sys
-import subprocess
 
-# ================================================================
-# ⚙️  設定（環境変数から読み込み）
-# ================================================================
+import ig_utils
+from ig_utils import (
+    ACCESS_TOKEN, IG_USER_ID, IMGBB_API_KEY,
+    check_credentials, upload_to_imgbb, download_image_as_pil,
+    post_to_instagram,
+)
 
-ACCESS_TOKEN  = os.environ.get('META_ACCESS_TOKEN', '')
-IG_USER_ID    = os.environ.get('INSTAGRAM_ACCOUNT_ID', '')
-IMGBB_API_KEY = os.environ.get('IMGBB_API_KEY', '')
-
-if not ACCESS_TOKEN or not IG_USER_ID:
-    print('❌ 環境変数 META_ACCESS_TOKEN / INSTAGRAM_ACCOUNT_ID が設定されていません。')
+if not check_credentials():
     sys.exit(1)
-
-print('✅ 認証情報を読み込みました。')
 
 # ── RSSフィード設定 ─────────────────────────────────────────────
 RSS_FEEDS = {
@@ -45,15 +39,10 @@ MAX_SUMMARY_CHARS = 200
 import feedparser
 import requests
 import re
-import json
 import time
-import io
-import base64
 import urllib.parse
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
-
-BASE_URL = 'https://graph.facebook.com/v19.0'
 
 
 def clean_html(raw):
@@ -187,32 +176,6 @@ def generate_news_card_image(title, source, summary):
     draw.text((60, H - 80), '📈 Market News Auto Post', font=font_small, fill='#475569')
     return img
 
-def upload_to_imgbb(pil_img, api_key):
-    if not api_key:
-        return None
-    buf = io.BytesIO()
-    pil_img.save(buf, format='JPEG', quality=90)
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    try:
-        resp = requests.post('https://api.imgbb.com/1/upload',
-                             data={'key': api_key, 'image': b64}, timeout=30)
-        data = resp.json()
-        if data.get('success'):
-            return data['data']['url']
-    except Exception as e:
-        print(f'    ⚠️ imgbbエラー: {e}')
-    return None
-
-def download_image_as_pil(url, timeout=90):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'}
-        resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
-        if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
-            return Image.open(io.BytesIO(resp.content)).convert('RGB')
-    except Exception as e:
-        print(f'    ⚠️ ダウンロードエラー: {e}')
-    return None
-
 def get_image_url(news):
     title   = news.get('title', '')
     source  = news.get('source', '')
@@ -302,51 +265,6 @@ def build_caption(news):
         f"{HASHTAGS}"
     )
 
-def create_media_container(image_url, caption):
-    resp = requests.post(
-        f'{BASE_URL}/{IG_USER_ID}/media',
-        data={'image_url': image_url, 'caption': caption,
-              'media_type': 'IMAGE', 'access_token': ACCESS_TOKEN}
-    )
-    data = resp.json()
-    if resp.status_code == 200 and 'id' in data:
-        print(f'  ✅ メディアコンテナ作成: ID={data["id"]}')
-        print('  ⏳ 処理待機中（10秒）...')
-        time.sleep(10)
-        return data['id']
-    print('  ❌ コンテナ作成失敗:')
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    return None
-
-def publish_media(container_id):
-    resp = requests.post(
-        f'{BASE_URL}/{IG_USER_ID}/media_publish',
-        data={'creation_id': container_id, 'access_token': ACCESS_TOKEN}
-    )
-    data = resp.json()
-    if resp.status_code == 200 and 'id' in data:
-        print(f'  🎉 投稿成功！ 投稿ID={data["id"]}')
-        return data['id']
-    print('  ❌ 投稿失敗:')
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    return None
-
-def post_to_instagram(image_url, caption):
-    print('=' * 55)
-    print('📤 Instagram投稿開始...')
-    print(f'  画像URL: {image_url[:70]}...')
-    print(f'  キャプション: {caption[:50]}...')
-    print('=' * 55)
-    if not image_url or not image_url.startswith('http'):
-        print('❌ 有効な画像URLがありません。')
-        return None
-    cid = create_media_container(image_url, caption)
-    if not cid:
-        return None
-    pid = publish_media(cid)
-    if pid:
-        print('\n✨ 投稿完了！Instagramアプリで確認してください。')
-    return pid
 
 
 # ================================================================

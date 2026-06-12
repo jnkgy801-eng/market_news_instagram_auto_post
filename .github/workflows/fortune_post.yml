@@ -1,0 +1,53 @@
+name: ラッキー星座・雑学ランキング 自動投稿（1日3回）
+
+on:
+  schedule:
+    # UTC時間 = JST - 9時間
+    # 22:00 UTC（前日）= JST 07:00 → 朝の「今日の星座ラッキーランキング」など
+    # 03:00 UTC        = JST 12:00 → お昼の投稿
+    # 10:00 UTC        = JST 19:00 → 夜の投稿
+    - cron: '0 22,3,10 * * *'
+
+  # 手動実行ボタン（テスト用）
+  workflow_dispatch:
+    inputs:
+      content_type:
+        description: '投稿するコンテンツの種類'
+        required: false
+        default: 'random'
+        type: choice
+        options:
+          - random
+          - zodiac
+          - trivia
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 日本語フォント（Noto Sans CJK）をインストール
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: 依存ライブラリをインストール
+        run: |
+          pip install requests pillow
+
+      - name: ラッキー星座・雑学ランキングを自動投稿
+        env:
+          META_ACCESS_TOKEN:    ${{ secrets.META_ACCESS_TOKEN }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          IMGBB_API_KEY:        ${{ secrets.IMGBB_API_KEY }}
+          FORTUNE_CONTENT_TYPE: ${{ github.event.inputs.content_type || 'random' }}
+        run: python fortune_post.py

@@ -1,10 +1,9 @@
 """
-🔮📸 今日のラッキー星座ランキング / 雑学ランキング → Instagram 自動投稿スクリプト
+🧠📸 今日の雑学ランキング → Instagram 自動投稿スクリプト
 GitHub Actions で1日数回、自動実行されます。
 
 市場ニュース（main.py）とは別に、閲覧者の「気を引く・保存したくなる」
-エンタメ系コンテンツ（星座ラッキーランキング・今日の雑学ランキング）を
-画像化してInstagramに投稿します。
+エンタメ系コンテンツ（今日の雑学ランキング）を画像化してInstagramに投稿します。
 """
 
 import os
@@ -24,14 +23,11 @@ from ig_utils import check_credentials, upload_to_imgbb, post_to_instagram
 # ⚙️  設定
 # ================================================================
 
-# 'zodiac'（星座ラッキーランキング） / 'trivia'（今日の雑学ランキング） / 'random'
-CONTENT_TYPE = os.environ.get('FORTUNE_CONTENT_TYPE', 'random')
-
 JST = datetime.timezone(datetime.timedelta(hours=9))
 NOW = datetime.datetime.now(JST)
 TODAY_STR = NOW.strftime('%Y-%m-%d')
 
-W, H = 1080, 1080
+W, H = 1080, 1350   # Instagram縦型（4:5比率）
 
 FONT_DIR = '/usr/share/fonts/opentype/noto'
 FONT_BLACK   = f'{FONT_DIR}/NotoSansCJK-Black.ttc'
@@ -43,100 +39,118 @@ WEEKDAY_JP = ['月', '火', '水', '木', '金', '土', '日']
 
 
 # ================================================================
-# 🗂️  コンテンツデータ
+# 🗂️  コンテンツデータ — 雑学ランキング用テーマ一覧
 # ================================================================
 
-ZODIAC_SIGNS = [
-    '牡羊座', '牡牛座', '双子座', '蟹座', '獅子座', '乙女座',
-    '天秤座', '蠍座', '射手座', '山羊座', '水瓶座', '魚座',
-]
-
-LUCKY_COLORS = [
-    'レッド', 'ブルー', 'イエロー', 'グリーン', 'ピンク', 'パープル',
-    'ホワイト', 'ゴールド', 'オレンジ', 'ターコイズ', 'シルバー',
-    'ラベンダー', 'ベージュ', 'ネイビー', 'ミント', 'ワインレッド',
-]
-
-LUCKY_ITEMS = [
-    'お気に入りのマグカップ', '手帳', '腕時計', 'ハンドクリーム',
-    '観葉植物', '香水', 'お守り', 'スマホケース', 'アロマキャンドル',
-    'ヘアアクセサリー', '読みかけの本', '推しグッズ', '新しい文房具',
-    'お財布', 'イヤホン', '折り紙鶴', 'キーホルダー', 'コインケース',
-]
-
-LUCKY_ACTIONS = [
-    '朝日を浴びながら深呼吸する', '部屋の掃除をしてスッキリさせる',
-    '気になっていた人に連絡してみる', 'いつもと違う道で帰る',
-    'お気に入りの音楽を聴く', '少し早起きしてみる',
-    '感謝の気持ちを言葉にする', '新しいことに挑戦してみる',
-    'カフェでひと息つく', '自然の多い場所を歩く',
-    '誰かの話をじっくり聞く', '部屋に花を飾る',
-]
-
-# 1位〜12位ごとの運勢コメント
-RANK_COMMENTS = [
-    '絶好調！何をやってもうまくいく、まさに無双の一日✨',
-    '好調の波に乗れる日。チャンスを逃さずキャッチして🍀',
-    '行動すればするだけ良いことが返ってくる予感',
-    '周囲との縁が深まり、嬉しい知らせが届きそう',
-    'コツコツ努力してきたことが少しずつ形になる日',
-    '安定した一日。いつも通りのペースで大丈夫',
-    '小さなラッキーが見つかる、ほっこり過ごせる日',
-    '気分の波があるかも。深呼吸してリラックスを',
-    '焦らずゆっくりがキーワード。無理は禁物',
-    '今日は守りの日。慎重な行動が吉と出る',
-    '少しお疲れモード？早めの休息でリセットしよう',
-    '充電期間。明日への準備をする一日に',
-]
-
-# ── 今日の雑学（豆知識）プール ───────────────────────────────────
-TRIVIA_FACTS = [
-    'バナナは植物学的には「ベリー」の一種に分類される',
-    '蜂蜜は正しく保存すれば数千年経っても食べられる',
-    'タコには脳が9つあり、各足にも小さな脳がある',
-    'フラミンゴの羽が赤いのはエビなど食べ物の色素が原因',
-    'ペンギンの多くは南極周辺に生息し、北極にはいない',
-    '人間の鼻は1兆種類近いにおいを区別できるとされる',
-    'カタツムリは環境が悪いと数年間眠ることがある',
-    '雷の温度は太陽の表面温度より高くなることがある',
-    'シロナガスクジラの心臓は小型車ほどの大きさになる',
-    '人は1日に約1万5000〜2万回まばたきしている',
-    '「ありがとう」は「有り難い」、つまり"めったにない"が語源',
-    'イルカは脳を半分ずつ休ませながら眠る',
-    'ラクダのこぶに入っているのは水ではなく脂肪',
-    '富士山は今も活火山に分類されている',
-    '1万円札の肖像は2024年から渋沢栄一になった',
-    '世界初の切手はイギリスで発行された「ペニー・ブラック」',
-    'ゾウは鏡に映った自分を認識できる数少ない動物のひとつ',
-    'カエルの多くは皮膚から直接呼吸することができる',
-    'ハチドリは唯一、後ろ向きに飛べる鳥として知られる',
-    '寿司の起源は東南アジア生まれの保存食「なれずし」とされる',
-    '江戸時代の握り寿司は、今で言うファストフードだった',
-    '牛は前足の構造上、階段をうまく下りられない',
-    'りんごは果肉の約25%が空気でできており水に浮く',
-    'スズメバチの女王は冬を越し、春に新しい巣をひとりで作り始める',
-    'ピーナッツはナッツではなくマメ科の植物の種子',
-    'イチゴはレモンよりビタミンCが多く含まれている',
-    '心臓は一生のうちに約20億回拍動するといわれる',
-    '月は1年に約3.8cmずつ地球から遠ざかっている',
-    '雪の結晶は同じ形のものが存在しないといわれる',
-    'コアラの指紋は人間のものと非常によく似ている',
-    'カンガルーは構造上、後ろ向きに歩くことができない',
-    'タツノオトシゴは雄がお腹の袋で卵を育てて出産する',
-    '蚊は人が出す二酸化炭素のにおいを感知して近づいてくる',
-    '世界で最も消費されている飲み物は水に次いでお茶といわれる',
-    '満月の夜は地球から見て月の同じ面しか見えない',
-    'チーターは加速力が非常に高く、わずか3秒で時速100km近くに達する',
-    '人間の骨は生まれたときは約300個あるが成長とともに減って206個になる',
-    '北極星（ポラリス）は実は1つではなく連星系である',
-    'キリンの鳴き声は非常に低周波で人にはほとんど聞こえない',
-    'コーヒーの木に実る果実は赤く、見た目はチェリーに似ている',
-    '南極大陸は世界最大の「砂漠」に分類されることがある',
-    '人間の体内では1日に数百万個の細胞が新しく作られている',
-    '虹は厳密には円形をしているが、地面に隠れて半円にしか見えない',
-    'タコの墨はイカの墨に比べて粘り気が少なく、逃げるための煙幕に近い',
-    '世界一硬い天然物質はダイヤモンドだが、加工品にはさらに硬いものもある',
-    '猫の鼻紋（鼻のしわ模様）は人間の指紋のように一匹ごとに異なる',
+TRIVIA_THEMES = [
+    {
+        "title": "迷う駅ランキング",
+        "unit": "駅",
+        "items": [
+            ("渋谷駅",   "再開発で構造が複雑&通路が頻繁に変わる。"),
+            ("新宿駅",   "路線・出口が多すぎて迷宮レベル。"),
+            ("大手町駅", "地下が広く出口も多く、距離が長い。"),
+            ("東京駅",   "路線間が遠く、特に京葉線が別棟レベル。"),
+            ("横浜駅",   "路線・地下道・ビル連絡が入り組みすぎ。"),
+            ("池袋駅",   "路線が密集し、出口の方角も混乱しやすい。"),
+            ("名古屋駅", "路線ごとの距離が遠く、地下街も迷路。"),
+            ("梅田駅",   "「梅田」が複数あり、JR大阪駅との連携も複雑。"),
+            ("天神駅",   "路線間で地上移動が多く、分かりづらい。"),
+            ("北千住駅", "路線間の乗り換え距離が長く、構造も複雑。"),
+        ],
+        "hashtags": "#迷う駅 #駅ランキング #電車 #乗り換え #鉄道 #雑学 #豆知識 #ランキング",
+        "footer_question": "あなたはどこで迷った？コメントで教えて！",
+    },
+    {
+        "title": "日本の長寿企業ランキング",
+        "unit": "位",
+        "items": [
+            ("金剛組（大阪）",     "578年創業。世界最古の建設会社。"),
+            ("池坊華道会（京都）", "587年創業。生け花の元祖。"),
+            ("西山温泉 慶雲館",   "705年創業。世界最古のホテル。"),
+            ("古まん（兵庫）",     "717年創業。有馬温泉の旅館。"),
+            ("善吾楼（石川）",     "718年創業。粟津温泉の旅館。"),
+            ("源泉亭 湧駒荘",     "1674年創業。北海道の老舗旅館。"),
+            ("虎屋（東京）",       "室町時代後期創業の和菓子の老舗。"),
+            ("住友グループ",       "1590年代に銅精錬業として創業。"),
+            ("三井グループ",       "1673年創業、日本最大財閥のルーツ。"),
+            ("松坂屋（名古屋）",   "1611年創業。日本最古のデパート。"),
+        ],
+        "hashtags": "#長寿企業 #老舗 #日本史 #雑学 #豆知識 #ランキング #歴史",
+        "footer_question": "知ってた？コメントで教えてね！",
+    },
+    {
+        "title": "体に関するびっくり雑学",
+        "unit": "位",
+        "items": [
+            ("まばたき回数",    "1日に約1万5000〜2万回もしている。"),
+            ("骨の数の変化",    "赤ちゃん300個→大人になると206個に減る。"),
+            ("心臓の拍動数",    "一生で約20億回拍動するといわれる。"),
+            ("嗅覚の識別力",    "人間は1兆種類近いにおいを区別できる。"),
+            ("細胞の新陳代謝",  "1日に数百万個の細胞が新しく生まれる。"),
+            ("体の水分量",      "体重の約60%が水分で構成されている。"),
+            ("脳の消費エネルギー", "脳は体全体のエネルギーの約20%を消費。"),
+            ("指紋の唯一性",    "同一の指紋を持つ人間は存在しない。"),
+            ("胃酸の強さ",      "胃酸のpHは1〜2。金属も溶かせる酸性度。"),
+            ("爪の成長速度",    "足の爪より手の爪の方が約3倍早く伸びる。"),
+        ],
+        "hashtags": "#体の雑学 #人体 #豆知識 #びっくり #雑学 #ランキング #知識",
+        "footer_question": "どれが一番びっくりした？コメントで！",
+    },
+    {
+        "title": "動物のびっくり雑学",
+        "unit": "位",
+        "items": [
+            ("タコの脳",       "脳が9つあり、各足にも小さな脳がある。"),
+            ("ハチドリの飛行", "唯一、後ろ向きに飛べる鳥として知られる。"),
+            ("ゾウの自己認識", "鏡に映った自分を認識できる数少ない動物。"),
+            ("イルカの睡眠",   "脳を半分ずつ休ませながら眠る。"),
+            ("カンガルー",      "構造上、後ろ向きに歩くことができない。"),
+            ("タツノオトシゴ", "雄がお腹の袋で卵を育てて出産する。"),
+            ("フラミンゴの羽", "食べ物の色素（エビ等）が原因で赤くなる。"),
+            ("コアラの指紋",   "人間のものと非常によく似ている。"),
+            ("ラクダのこぶ",   "中に入っているのは水ではなく脂肪。"),
+            ("チーターの加速", "わずか3秒で時速100km近くに達する。"),
+        ],
+        "hashtags": "#動物雑学 #豆知識 #動物 #びっくり #雑学 #ランキング #自然",
+        "footer_question": "どの動物が一番好き？コメントで！",
+    },
+    {
+        "title": "食べ物のびっくり雑学",
+        "unit": "位",
+        "items": [
+            ("バナナの分類",   "植物学的には「ベリー」の一種に分類される。"),
+            ("蜂蜜の保存性",  "正しく保存すれば数千年経っても食べられる。"),
+            ("りんごの成分",  "果肉の約25%が空気でできており水に浮く。"),
+            ("寿司の起源",    "東南アジア生まれの保存食「なれずし」が起源。"),
+            ("イチゴのビタミンC", "レモンよりビタミンCが多く含まれる。"),
+            ("ピーナッツの分類", "ナッツではなくマメ科植物の種子。"),
+            ("お茶の消費量",  "水に次いで世界で最も消費される飲み物。"),
+            ("コーヒーの実",  "赤い果実がなり、見た目はチェリーに似る。"),
+            ("江戸の握り寿司", "今で言うファストフードとして庶民に親しまれた。"),
+            ("1万円札の肖像", "2024年から渋沢栄一にデザイン変更された。"),
+        ],
+        "hashtags": "#食べ物雑学 #食の豆知識 #グルメ #トリビア #雑学 #ランキング",
+        "footer_question": "どれが一番「へぇ」でした？コメントで！",
+    },
+    {
+        "title": "宇宙・自然のびっくり雑学",
+        "unit": "位",
+        "items": [
+            ("月の移動",        "月は1年に約3.8cmずつ地球から遠ざかっている。"),
+            ("雷の温度",        "雷の温度は太陽の表面温度より高くなることがある。"),
+            ("雪の結晶",        "同じ形の結晶は存在しないといわれる。"),
+            ("北極星の正体",    "北極星（ポラリス）は実は連星系である。"),
+            ("虹の形",          "厳密には円形だが地面に隠れて半円にしか見えない。"),
+            ("南極の分類",      "南極大陸は世界最大の「砂漠」に分類されることがある。"),
+            ("富士山の現状",    "富士山は今も活火山に分類されている。"),
+            ("シロナガスクジラ", "心臓は小型車ほどの大きさになる。"),
+            ("ダイヤモンドの硬さ", "天然物質で最も硬いが、加工品にはさらに硬いものもある。"),
+            ("カタツムリの睡眠", "環境が悪いと数年間眠ることがある。"),
+        ],
+        "hashtags": "#宇宙雑学 #自然の不思議 #豆知識 #サイエンス #雑学 #ランキング",
+        "footer_question": "一番びっくりしたのはどれ？コメントで！",
+    },
 ]
 
 
@@ -153,29 +167,17 @@ def get_font(path, size):
 
 _EMOJI_PATTERN = re.compile(
     '['
-    '\U0001F000-\U0001FFFF'  # 絵文字全般
-    '\U00002600-\U000027BF'  # その他記号・絵文字
-    '\U00002190-\U000021FF'  # 矢印
-    '\U00002B00-\U00002BFF'  # 記号・矢印
-    '\U0000FE00-\U0000FE0F'  # 異字体セレクタ
+    '\U0001F000-\U0001FFFF'
+    '\U00002600-\U000027BF'
+    '\U00002190-\U000021FF'
+    '\U00002B00-\U00002BFF'
+    '\U0000FE00-\U0000FE0F'
     ']+', flags=re.UNICODE)
 
 
 def for_image(text):
     """Noto Sans CJKに存在しない絵文字等を画像描画用に取り除く。"""
     return _EMOJI_PATTERN.sub('', text).strip()
-
-
-def vertical_gradient(w, h, top_rgb, bottom_rgb):
-    img = Image.new('RGB', (w, h), top_rgb)
-    draw = ImageDraw.Draw(img)
-    for y in range(h):
-        ratio = y / max(h - 1, 1)
-        r = int(top_rgb[0] + (bottom_rgb[0] - top_rgb[0]) * ratio)
-        g = int(top_rgb[1] + (bottom_rgb[1] - top_rgb[1]) * ratio)
-        b = int(top_rgb[2] + (bottom_rgb[2] - top_rgb[2]) * ratio)
-        draw.line([(0, y), (w, y)], fill=(r, g, b))
-    return img, draw
 
 
 def text_width(draw, text, font):
@@ -209,211 +211,186 @@ def draw_centered_text(draw, text, font, center_x, y, fill):
     draw.text((center_x - w / 2, y), text, font=font, fill=fill)
 
 
-def draw_rank_badge(draw, cx, cy, radius, rank, fill, text_fill='#1a1a2e', font=None):
-    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=fill)
-    label = str(rank)
-    if font is None:
-        font = get_font(FONT_BLACK, int(radius * 1.2))
-    bbox = draw.textbbox((0, 0), label, font=font)
-    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((cx - w / 2 - bbox[0], cy - h / 2 - bbox[1]), label, font=font, fill=text_fill)
-
-
-def scatter_stars(draw, w, h, rng, count=70, top_area=720):
-    for _ in range(count):
-        x = rng.randint(0, w)
-        y = rng.randint(0, top_area)
-        size = rng.choice([1, 1, 1, 2, 2, 3])
-        alpha = rng.choice(['#ffffff', '#cfd8ff', '#9aa6e8'])
-        draw.ellipse([x, y, x + size, y + size], fill=alpha)
-
-
 # ================================================================
-# 🔮 星座ラッキーランキング
+# 🖼️  画像生成 — 表スタイル（添付画像のようなレイアウト）
 # ================================================================
 
-def build_zodiac_data(seed):
-    rng = random.Random(seed)
-    order = ZODIAC_SIGNS[:]
-    rng.shuffle(order)
+# 順位ごとの色（1〜10位）
+RANK_ROW_BG = [
+    '#FFF3CD',   # 1位: 金系
+    '#E8E8E8',   # 2位: 銀系
+    '#FFDCB8',   # 3位: 銅系
+    '#DFFFF7',   # 4位
+    '#DFFFF7',   # 5位
+    '#F0F8FF',   # 6位
+    '#F0F8FF',   # 7位
+    '#F0F0F0',   # 8位
+    '#F0F0F0',   # 9位
+    '#EAEAEA',   # 10位
+]
 
-    details = []
-    for i, sign in enumerate(order):
-        rank = i + 1
-        item = {
-            'rank': rank,
-            'sign': sign,
-            'comment': RANK_COMMENTS[i],
-        }
-        if rank <= 3:
-            item['color'] = rng.choice(LUCKY_COLORS)
-            item['lucky_item'] = rng.choice(LUCKY_ITEMS)
-            item['action'] = rng.choice(LUCKY_ACTIONS)
-        details.append(item)
-    return details
+RANK_NUM_COLOR = [
+    '#B8860B',   # 1位
+    '#888888',   # 2位
+    '#A0522D',   # 3位
+    '#2E8B57',   # 4位
+    '#2E8B57',   # 5位
+    '#4169E1',   # 6位
+    '#4169E1',   # 7位
+    '#555555',   # 8位
+    '#555555',   # 9位
+    '#333333',   # 10位
+]
 
 
-RANK_MEDAL_COLORS = {1: '#FFD45E', 2: '#D9DEE8', 3: '#E3A06A'}
+def generate_trivia_table_image(theme: dict, date_label: str) -> Image.Image:
+    """
+    添付画像のような表形式ランキング画像を生成する。
 
+    レイアウト:
+      ┌─────────────────────────────┐
+      │  タイトル（赤ベタ・太字）         │
+      │  日付ラベル（小）                │
+      ├──┬──────┬────────────────────┤  ← ヘッダー行
+      │順位│ 名称  │  主な理由（簡潔に）  │
+      ├──┼──────┼────────────────────┤
+      │  1│ xxx  │ yyy                  │
+      │ …│  …   │  …                   │
+      └──┴──────┴────────────────────┘
+      │ フッター質問文                    │
+    """
 
-def generate_zodiac_image(data, date_label):
-    img, draw = vertical_gradient(W, H, (26, 16, 64), (61, 31, 110))
-    rng = random.Random(TODAY_STR + '-stars')
-    scatter_stars(draw, W, H, rng)
+    img = Image.new('RGB', (W, H), '#FFFFFF')
+    draw = ImageDraw.Draw(img)
 
-    title_font = get_font(FONT_BLACK, 56)
-    date_font  = get_font(FONT_MEDIUM, 30)
-    name_font  = get_font(FONT_BOLD, 46)
-    sub_font   = get_font(FONT_REGULAR, 28)
-    list_font  = get_font(FONT_MEDIUM, 32)
-    rank_font  = get_font(FONT_BOLD, 28)
+    # ── フォント ──
+    title_font   = get_font(FONT_BLACK,  60)
+    date_font    = get_font(FONT_MEDIUM, 28)
+    header_font  = get_font(FONT_BOLD,   32)
+    rank_font    = get_font(FONT_BLACK,  46)
+    name_font    = get_font(FONT_BOLD,   32)
+    reason_font  = get_font(FONT_REGULAR,28)
+    footer_font  = get_font(FONT_BOLD,   32)
 
-    draw_centered_text(draw, '今日の星座ラッキーランキング', title_font, W / 2, 48, '#ffffff')
-    draw_centered_text(draw, date_label, date_font, W / 2, 118, '#c9b8ff')
+    # ── タイトル領域（赤い帯） ──
+    title_area_h = 160
+    draw.rectangle([0, 0, W, title_area_h], fill='#E83030')
 
-    # ── TOP3 カード ─────────────────────────────────────────────
-    card_x0, card_x1 = 50, W - 50
-    card_h = 150
-    card_gap = 14
-    y = 175
-    for item in data[:3]:
-        rank = item['rank']
-        draw.rounded_rectangle([card_x0, y, card_x1, y + card_h], radius=24,
-                                fill=(255, 255, 255, 255), outline=None)
-        # 半透明感を出すため少し暗めの白
-        overlay = Image.new('RGB', (card_x1 - card_x0, card_h), (255, 255, 255))
-        img.paste(overlay, (card_x0, y))
-        draw = ImageDraw.Draw(img)
-        draw.rounded_rectangle([card_x0, y, card_x1, y + card_h], radius=24, fill='#ffffff')
+    # タイトルテキスト（白ふち + 白文字）
+    title_text = for_image(theme['title'])
+    tw = text_width(draw, title_text, title_font)
+    tx = (W - tw) / 2
+    ty = 28
+    # 影
+    for dx, dy in [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, 4), (4, 0)]:
+        draw.text((tx + dx, ty + dy), title_text, font=title_font, fill='#8B0000')
+    draw.text((tx, ty), title_text, font=title_font, fill='#FFFFFF')
 
-        badge_cx, badge_cy, radius = card_x0 + 80, y + card_h / 2, 44
-        draw_rank_badge(draw, badge_cx, badge_cy, radius, rank,
-                         fill=RANK_MEDAL_COLORS[rank], text_fill='#2a1a52',
-                         font=get_font(FONT_BLACK, 50))
+    # 日付（タイトル帯内）
+    draw_centered_text(draw, date_label, date_font, W / 2, title_area_h - 36, '#FFE0E0')
 
-        text_x = card_x0 + 150
-        draw.text((text_x, y + 18), item['sign'], font=name_font, fill='#2a1a52')
-        info = f"ラッキーカラー: {item['color']} ／ ラッキーアイテム: {item['lucky_item']}"
-        draw.text((text_x, y + 72), info, font=sub_font, fill='#5b4a8a')
-        comment_lines = wrap_text(draw, for_image(item['comment']), sub_font, card_x1 - text_x - 20, max_lines=1)
-        draw.text((text_x, y + 108), comment_lines[0], font=sub_font, fill='#9b8bd0')
+    # ── テーブルヘッダー ──
+    header_y = title_area_h + 2
+    header_h = 52
 
-        y += card_h + card_gap
+    # ヘッダー背景（薄緑）
+    draw.rectangle([0, header_y, W, header_y + header_h], fill='#C8E6C9')
 
-    # ── 4〜12位 リスト ───────────────────────────────────────────
-    list_top = y + 10
-    list_bottom = H - 90
+    col_rank_w  = 90
+    col_name_w  = 250
+    col_reason_x = col_rank_w + col_name_w + 12
 
-    draw_centered_text(draw, '― 4位 〜 12位 ―', sub_font, W / 2, list_top - 8, '#c9b8ff')
-    list_top += 36
-    row_h = (list_bottom - list_top) / 9
-    rank_label_font = get_font(FONT_BOLD, 28)
+    # ヘッダーテキスト
+    draw.text((18, header_y + 10), '順位', font=header_font, fill='#1B5E20')
+    draw.text((col_rank_w + 10, header_y + 10), '名称' if theme['unit'] == '駅' else '項目',
+              font=header_font, fill='#1B5E20')
+    draw.text((col_reason_x, header_y + 10), '主な理由（簡潔に）', font=header_font, fill='#1B5E20')
 
-    for idx, item in enumerate(data[3:]):
-        ry = list_top + idx * row_h
-        cy = ry + row_h / 2
-        draw.text((60, cy - 18), f"{item['rank']}位", font=rank_label_font, fill='#c9b8ff')
-        draw.text((150, cy - 18), item['sign'], font=list_font, fill='#ffffff')
-        comment_lines = wrap_text(draw, for_image(item['comment']), get_font(FONT_REGULAR, 24), W - 380 - 60, max_lines=1)
-        draw.text((380, cy - 14), comment_lines[0], font=get_font(FONT_REGULAR, 24), fill='#a99adf')
+    # ── 各行 ──
+    row_start_y = header_y + header_h + 4
+    items = theme['items'][:10]
+    n_rows = len(items)
+    # 残り高さを均等分割（フッター分を確保）
+    footer_area_h = 110
+    avail_h = H - row_start_y - footer_area_h
+    row_h = avail_h // n_rows
 
-    # ── フッター ────────────────────────────────────────────────
-    footer_font = get_font(FONT_MEDIUM, 30)
-    draw.line([(60, H - 70), (W - 60, H - 70)], fill='#5b4a8a', width=2)
-    draw_centered_text(draw, for_image('保存して毎日チェックしてね🌙'), footer_font, W / 2, H - 56, '#e6defb')
+    for i, (name, reason) in enumerate(items):
+        ry = row_start_y + i * row_h
+        bg = RANK_ROW_BG[i] if i < len(RANK_ROW_BG) else '#F5F5F5'
+        draw.rectangle([0, ry, W, ry + row_h - 3], fill=bg)
+
+        # 区切り線
+        draw.line([(0, ry + row_h - 3), (W, ry + row_h - 3)], fill='#BDBDBD', width=1)
+
+        rank_num = i + 1
+        num_color = RANK_NUM_COLOR[i] if i < len(RANK_NUM_COLOR) else '#333333'
+
+        # 順位数字
+        rnum_str = f'{rank_num}位'
+        rnum_font = get_font(FONT_BLACK, 40) if rank_num >= 10 else rank_font
+        rnum_w = text_width(draw, rnum_str, rnum_font)
+        draw.text((col_rank_w / 2 - rnum_w / 2, ry + (row_h - 48) / 2),
+                  rnum_str, font=rnum_font, fill=num_color)
+
+        # 縦線
+        draw.line([(col_rank_w, ry), (col_rank_w, ry + row_h - 3)], fill='#BDBDBD', width=1)
+        draw.line([(col_rank_w + col_name_w, ry), (col_rank_w + col_name_w, ry + row_h - 3)],
+                  fill='#BDBDBD', width=1)
+
+        # 駅名 / 項目名
+        name_lines = wrap_text(draw, for_image(name), name_font, col_name_w - 10, max_lines=2)
+        name_total_h = len(name_lines) * 36
+        name_sy = ry + (row_h - name_total_h) / 2
+        for li, ln in enumerate(name_lines):
+            draw.text((col_rank_w + 6, name_sy + li * 36), ln, font=name_font, fill='#212121')
+
+        # 理由
+        reason_max_w = W - col_reason_x - 14
+        reason_lines = wrap_text(draw, for_image(reason), reason_font, reason_max_w, max_lines=3)
+        reason_total_h = len(reason_lines) * 34
+        reason_sy = ry + (row_h - reason_total_h) / 2
+        for li, ln in enumerate(reason_lines):
+            draw.text((col_reason_x, reason_sy + li * 34), ln, font=reason_font, fill='#424242')
+
+    # ── フッター（質問文＋吹き出し風） ──
+    footer_y = H - footer_area_h
+    draw.rectangle([0, footer_y, W, H], fill='#FFF8E1')
+    draw.line([(0, footer_y), (W, footer_y)], fill='#F9A825', width=3)
+
+    footer_text = for_image(theme.get('footer_question', 'コメントで教えてね！'))
+    draw_centered_text(draw, footer_text, footer_font, W / 2, footer_y + 20, '#E65100')
+
+    # サブテキスト
+    sub_font2 = get_font(FONT_MEDIUM, 26)
+    draw_centered_text(draw, 'コメントで教えてください！', sub_font2, W / 2, footer_y + 66, '#BF360C')
 
     return img
 
 
-def build_zodiac_caption(data, date_label):
-    lines = [f'🔮 今日（{date_label}）の星座ラッキーランキング！\n']
-    for item in data:
-        rank = item['rank']
-        if rank <= 3:
-            lines.append(
-                f"{rank}位：{item['sign']}\n"
-                f"　 ラッキーカラー → {item['color']}\n"
-                f"　 ラッキーアイテム → {item['lucky_item']}\n"
-                f"　 ラッキーアクション → {item['action']}\n"
-                f"　 {item['comment']}\n"
-            )
-        else:
-            lines.append(f"{rank}位：{item['sign']}　{item['comment']}")
+# ================================================================
+# 📝 キャプション生成
+# ================================================================
 
+def build_trivia_caption(theme: dict, date_label: str) -> str:
+    lines = [f'🧠 {date_label} の雑学ランキング\n']
+    lines.append(f'【{theme["title"]}】\n')
+    for i, (name, reason) in enumerate(theme['items'][:10]):
+        lines.append(f'{i+1}位：{name}')
+        lines.append(f'　→ {reason}')
     body = '\n'.join(lines)
-    hashtags = (
-        '\n\n#星座占い #今日の運勢 #星座ランキング #ラッキー星座 '
-        '#占い好き #ホロスコープ #運勢ランキング #今日のラッキーアイテム'
-    )
-    note = '\n\n⚠️ 占いはエンタメ目的です。一日を楽しく過ごすヒントにしてくださいね😊'
+    note = f'\n\n{theme.get("footer_question", "コメントで教えてください！")}'
+    hashtags = f'\n\n{theme.get("hashtags", "#雑学 #豆知識 #ランキング")}'
     return body + note + hashtags
 
 
 # ================================================================
-# 🧠 今日の雑学ランキング
+# 🗓️  テーマ選択（日付ベースで毎日違うテーマを選ぶ）
 # ================================================================
 
-def build_trivia_data(seed):
+def pick_theme(seed: str) -> dict:
     rng = random.Random(seed)
-    facts = TRIVIA_FACTS[:]
-    rng.shuffle(facts)
-    chosen = facts[:5]
-    return [{'rank': i + 1, 'fact': fact} for i, fact in enumerate(chosen)]
-
-
-RANK_BADGE_COLORS = {1: '#FFD45E', 2: '#D9DEE8', 3: '#E3A06A', 4: '#7FD8C8', 5: '#7FD8C8'}
-
-
-def generate_trivia_image(data, date_label):
-    img, draw = vertical_gradient(W, H, (12, 30, 38), (38, 78, 96))
-
-    title_font = get_font(FONT_BLACK, 54)
-    date_font  = get_font(FONT_MEDIUM, 30)
-    fact_font  = get_font(FONT_BOLD, 34)
-
-    draw_centered_text(draw, '今日の雑学ランキング TOP5', title_font, W / 2, 40, '#ffffff')
-    draw_centered_text(draw, date_label, date_font, W / 2, 104, '#a9eee0')
-
-    card_x0, card_x1 = 50, W - 50
-    card_h = 167
-    card_gap = 8
-    y = 150
-
-    for item in data:
-        draw.rounded_rectangle([card_x0, y, card_x1, y + card_h], radius=22, fill='#ffffff')
-        badge_cx, badge_cy, radius = card_x0 + 80, y + card_h / 2, 46
-        draw_rank_badge(draw, badge_cx, badge_cy, radius, item['rank'],
-                        fill=RANK_BADGE_COLORS.get(item['rank'], '#7FD8C8'),
-                        text_fill='#0c1e26', font=get_font(FONT_BLACK, 52))
-
-        text_x = card_x0 + 150
-        lines = wrap_text(draw, for_image(item['fact']), fact_font, card_x1 - text_x - 30, max_lines=3)
-        line_h = 44
-        total_h = line_h * len(lines)
-        start_y = y + (card_h - total_h) / 2
-        for li, ln in enumerate(lines):
-            draw.text((text_x, start_y + li * line_h), ln, font=fact_font, fill='#123238')
-
-        y += card_h + card_gap
-
-    footer_font = get_font(FONT_MEDIUM, 30)
-    draw.line([(60, H - 56), (W - 60, H - 56)], fill='#a9eee0', width=2)
-    draw_centered_text(draw, for_image('保存して友達にも教えてあげよう📚'), footer_font, W / 2, H - 44, '#e6fbf6')
-
-    return img
-
-
-def build_trivia_caption(data, date_label):
-    lines = [f'🧠 今日（{date_label}）の雑学ランキング TOP5！\n']
-    for item in data:
-        lines.append(f"{item['rank']}位：{item['fact']}")
-    body = '\n'.join(lines)
-    hashtags = (
-        '\n\n#雑学 #今日の雑学 #トリビア #面白い知識 #知ってた '
-        '#雑学ランキング #暇つぶし #へぇボタン'
-    )
-    note = '\n\nどれが一番「へぇ」でしたか？コメントで教えてください👇'
-    return body + note + hashtags
+    return rng.choice(TRIVIA_THEMES)
 
 
 # ================================================================
@@ -426,25 +403,18 @@ def main():
 
     date_label = f"{NOW.year}年{NOW.month}月{NOW.day}日（{WEEKDAY_JP[NOW.weekday()]}）"
 
-    content_type = CONTENT_TYPE
-    if content_type == 'random':
-        rng = random.Random(NOW.strftime('%Y-%m-%d-%H'))
-        content_type = rng.choice(['zodiac', 'trivia'])
+    # 1日3回実行されるが、テーマは時間帯ごとに変える
+    seed = NOW.strftime('%Y-%m-%d-%H')
+    theme = pick_theme(seed)
 
-    print(f'📌 コンテンツタイプ: {content_type}')
+    print(f'📌 テーマ: {theme["title"]}')
 
-    if content_type == 'trivia':
-        data = build_trivia_data(TODAY_STR + '-trivia')
-        img = generate_trivia_image(data, date_label)
-        caption = build_trivia_caption(data, date_label)
-    else:
-        data = build_zodiac_data(TODAY_STR + '-zodiac')
-        img = generate_zodiac_image(data, date_label)
-        caption = build_zodiac_caption(data, date_label)
+    img = generate_trivia_table_image(theme, date_label)
+    caption = build_trivia_caption(theme, date_label)
 
     print('☁️  画像をimgbbにアップロード中...')
     if not ig_utils.IMGBB_API_KEY:
-        print('❌ IMGBB_API_KEY が設定されていません。画像投稿には imgbb の設定が必要です。')
+        print('❌ IMGBB_API_KEY が設定されていません。')
         sys.exit(1)
 
     image_url = upload_to_imgbb(img)

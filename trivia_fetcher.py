@@ -7,6 +7,11 @@
   2. Wikipedia API      — トレンドキーワードの記事概要 → 雑学ポイントを抽出
   3. Wikipedia 今日の出来事 — 今日の歴史的出来事
   4. フォールバック固定プール — 取得失敗時の保険
+
+【設計方針】
+- 「名前」列と「説明」列がセットで意味が通じることを最優先
+- Wikipediaから取った説明は必ず「〇〇は〜」の形に整形して単体で読める文にする
+- 件数が少なくてもフォールバックプールで必ず補完するので投稿は途切れない
 """
 
 import re
@@ -27,7 +32,6 @@ UA = 'Mozilla/5.0 (compatible; TriviaBot/1.0; +https://github.com)'
 # ================================================================
 
 def _get(url, timeout=10):
-    """GETリクエスト → テキスト。失敗時はNone。"""
     try:
         req = urllib.request.Request(
             url, headers={'User-Agent': UA, 'Accept-Language': 'ja,en;q=0.8'})
@@ -57,27 +61,99 @@ def _clean(text):
     return text.strip()
 
 
-def _shorten(text, max_chars=42):
-    """句点・。で区切り、最初の1〜2文に収める。"""
+def _first_sentence(text, max_chars=50):
+    """
+    テキストから最初の1文を取り出す。
+    句点で終わる完全な文として返す。max_charsを超える場合は切る。
+    """
     text = _clean(text)
-    # 句点で区切り最初の文を取る
-    sentences = re.split(r'[。．！？\!?]', text)
-    sentences = [s.strip() for s in sentences if s.strip()]
-    if not sentences:
-        return text[:max_chars]
-    result = sentences[0]
-    if len(result) <= 20 and len(sentences) > 1:
-        result += '。' + sentences[1]
-    if len(result) > max_chars:
-        result = result[:max_chars - 1] + '…'
-    return result
+    # 句点・感嘆符・疑問符で区切る
+    m = re.search(r'(.{8,}?[。！？])', text)
+    if m:
+        s = m.group(1).strip()
+        if len(s) <= max_chars:
+            return s
+        # 長すぎる場合は別の区切りを試みる
+    # 読点で区切って短くする
+    parts = re.split(r'[。！？]', text)
+    parts = [p.strip() for p in parts if p.strip()]
+    if parts and len(parts[0]) >= 8:
+        s = parts[0]
+        return (s[:max_chars - 1] + '…') if len(s) > max_chars else s + '。'
+    return None
+
+
+def _make_readable(keyword, summary, max_chars=50):
+    """
+    Wikipedia概要とキーワードから「○○は〜。」形式の読める説明文を作る。
+
+    優先順位:
+      1. 「キーワードは〜」「キーワードとは〜」で始まる文を探す
+      2. 数値・記録・特徴を含む文を探す
+      3. 最初の1文をそのまま使う
+      4. 失敗時はNone
+    """
+    if not summary or not keyword:
+        return None
+
+    text = _clean(summary)
+    sentences = [s.strip() for s in re.split(r'[。！？]', text) if s.strip()]
+
+    # ── 優先1: 「キーワードは/とは」で始まる文 ──────────────────
+    for s in sentences[:5]:
+        if s.startswith(keyword) or re.match(rf'^{re.escape(keyword[:4])}', s):
+            # 「〜は〜」「〜とは〜」の形か確認
+            if re.search(r'(は|とは|とも呼|として)', s[:len(keyword)+8]):
+                clean_s = s[:max_chars]
+                if len(s) > max_chars:
+                    clean_s += '…'
+                else:
+                    clean_s += '。'
+                if len(clean_s) >= 12:
+                    return clean_s
+
+    # ── 優先2: 特徴的な数値・記録を含む文 ───────────────────────
+    NUM_PATTERN = re.compile(
+        r'(\d[\d,\.]+(?:万|億|兆|km|m|cm|kg|g|℃|度|年|個|人|羽|頭|匹|本|枚|冊|件|回|倍|%|％))')
+    FEAT_PATTERN = re.compile(
+        r'(世界初|世界一|世界最|日本初|日本最|唯一|最大|最小|最古|最長|最速|最多|最少)')
+
+    for s in sentences[:8]:
+        if NUM_PATTERN.search(s) or FEAT_PATTERN.search(s):
+            # キーワードが含まれているか、短くてもOK
+            snippet = s[:max_chars]
+            if len(s) > max_chars:
+                snippet += '…'
+            else:
+                snippet += '。'
+            if len(snippet) >= 12:
+                # 主語が欠けている場合はキーワードを先頭に補う
+                if not s.startswith(keyword[:2]):
+                    snippet = f'{keyword}は' + snippet
+                    snippet = snippet[:max_chars + len(keyword) + 1]
+                    if not snippet.endswith('。') and not snippet.endswith('…'):
+                        snippet += '…'
+                return snippet
+
+    # ── 優先3: 最初の文をそのまま ────────────────────────────────
+    if sentences:
+        s = sentences[0]
+        if len(s) >= 10:
+            snippet = s[:max_chars]
+            if len(s) > max_chars:
+                snippet += '…'
+            else:
+                snippet += '。'
+            return snippet
+
+    return None
 
 
 # ================================================================
 # 📡 ソース1: Google Trends RSS（日本）
 # ================================================================
 
-def fetch_google_trends_jp(n=15):
+def fetch_google_trends_jp(n=20):
     """Googleトレンド（日本）からトレンドキーワードを取得。"""
     url = 'https://trends.google.com/trends/trendingsearches/daily/rss?geo=JP'
     xml = _get(url)
@@ -90,7 +166,8 @@ def fetch_google_trends_jp(n=15):
             title_el = item.find('title')
             if title_el is not None and title_el.text:
                 kw = title_el.text.strip()
-                if kw and len(kw) >= 2:
+                # 人名っぽいもの（姓名2語）や記号を含むものを除外
+                if kw and 2 <= len(kw) <= 15 and not re.search(r'[・＆&/\-]', kw):
                     keywords.append(kw)
             if len(keywords) >= n:
                 break
@@ -114,7 +191,7 @@ def fetch_wikipedia_summary(title):
             'prop': 'extracts',
             'exintro': True,
             'explaintext': True,
-            'exsentences': 3,
+            'exsentences': 5,
             'format': 'json',
             'utf8': 1,
         })
@@ -132,8 +209,8 @@ def fetch_wikipedia_summary(title):
     return None
 
 
-def fetch_wikipedia_random_featured(n=10):
-    """Wikipedia の注目記事タイトル一覧を取得。"""
+def fetch_wikipedia_random_featured(n=15):
+    """Wikipedia の秀逸な記事タイトルをランダムに取得。"""
     url = (
         'https://ja.wikipedia.org/w/api.php?'
         + urllib.parse.urlencode({
@@ -152,8 +229,8 @@ def fetch_wikipedia_random_featured(n=10):
     if data:
         members = data.get('query', {}).get('categorymembers', [])
         titles = [m['title'] for m in members if ':' not in m['title']]
-    # シャッフルしてn件
-    random.shuffle(titles)
+    rng = random.Random(NOW.strftime('%Y-%m-%d'))
+    rng.shuffle(titles)
     return titles[:n]
 
 
@@ -182,51 +259,19 @@ def fetch_wikipedia_on_this_day():
         if pid == '-1':
             continue
         extract = page.get('extract', '')
-        # 「できごと」セクションの年号付き行を抽出
         lines = extract.split('\n')
         for line in lines:
             line = line.strip()
-            # 「YYYY年 - 〜」パターン
             m = re.match(r'^(\d{3,4})年\s*[–\-]\s*(.+)', line)
             if m:
-                year, event = m.group(1), m.group(2).strip()
-                event = _clean(event)
-                if 10 < len(event) < 60:
-                    facts.append((year, event))
-    return facts[:8]
-
-
-# ================================================================
-# 🧠 雑学ポイントを Wikipedia 概要から抽出
-# ================================================================
-
-_TRIVIA_PATTERNS = [
-    # 数値・記録系
-    r'(\d+(?:\.\d+)?(?:万|億|兆|km|m|cm|kg|g|℃|度|年|個|人|羽|頭|匹|本|枚|冊|件|回|倍|%|％)[^。、]{0,30})',
-    # 「〜は〜である」「〜は〜とされる」
-    r'([^。]{5,40}(?:とされる|と言われる|といわれる|に分類される|が特徴|として知られる)[^。]{0,20})',
-    # 「世界初」「世界一」「日本初」「唯一」
-    r'([^。]{0,10}(?:世界初|世界一|日本初|日本最|唯一|最大|最小|最古|最長|最速)[^。]{5,40})',
-    # 「〜の名前の由来」「語源」
-    r'([^。]{0,10}(?:名前の由来|語源|名称は|由来は)[^。]{5,40})',
-]
-
-
-def extract_trivia_point(summary, keyword):
-    """Wikipedia概要から雑学ポイントを抽出。"""
-    if not summary:
-        return None
-    for pattern in _TRIVIA_PATTERNS:
-        m = re.search(pattern, summary)
-        if m:
-            point = _clean(m.group(1))
-            if 8 < len(point) < 55:
-                return point
-    # パターン未命中 → 最初の文を短縮
-    first = re.split(r'[。]', _clean(summary))[0]
-    if 10 < len(first) < 55:
-        return first + '。'
-    return None
+                year, event = m.group(1), _clean(m.group(2).strip())
+                # 意味が通じる長さのみ採用
+                if 15 <= len(event) <= 45:
+                    # 「○○年に〜した。」形式に整形
+                    if not event.endswith('。'):
+                        event += '。'
+                    facts.append((f'{year}年の今日', event))
+    return facts[:5]
 
 
 # ================================================================
@@ -236,147 +281,124 @@ def extract_trivia_point(summary, keyword):
 def build_hot_trivia_ranking(max_items=10):
     """
     今日のホット雑学ランキングを組み立てて返す。
-
-    Returns:
-        dict: {
-            'title': str,
-            'items': [(name, reason), ...],   # max_items件
-            'hashtags': str,
-            'footer_question': str,
-            'sources': [str],
-        }
+    名前列と説明列が必ずセットで意味の通る文になるよう整形する。
+    件数はmax_items以下になることがあるが、最低5件はフォールバックで保証。
     """
     items = []
-    sources_used = []
+    seen_names = set()
+
+    def add(name, reason):
+        """重複・空・短すぎ をガードしてから追加。"""
+        name = name.strip()
+        reason = reason.strip()
+        if not name or not reason:
+            return False
+        if len(reason) < 10:
+            return False
+        # 「。」で終わっていなければ補う
+        if not reason[-1] in '。！？…':
+            reason += '。'
+        # 名前がすでにある場合はスキップ
+        if name in seen_names:
+            return False
+        seen_names.add(name)
+        items.append((name, reason))
+        return True
 
     # ── A. 今日の出来事（Wikipedia） ─────────────────────────
     print('  📅 今日の出来事を取得中...')
     otd = fetch_wikipedia_on_this_day()
-    if otd:
-        sources_used.append('Wikipedia 今日の出来事')
-        rng = random.Random(NOW.strftime('%Y-%m-%d-otd'))
-        rng.shuffle(otd)
-        for year, event in otd[:3]:
-            name = f'{year}年の出来事'
-            reason = event[:42]
-            items.append((name, reason))
-            if len(items) >= 3:
-                break
+    for name, event in otd[:3]:
+        add(name, event)
 
-    # ── B. Googleトレンドキーワード → Wikipedia概要から雑学抽出 ─
+    # ── B. Googleトレンド → Wikipedia で雑学抽出 ──────────────
     print('  🌐 Googleトレンドを取得中...')
     trends = fetch_google_trends_jp(n=20)
-    if trends:
-        sources_used.append('Google Trends JP')
-        tried = 0
-        for kw in trends:
-            if len(items) >= max_items:
-                break
-            if tried >= 12:   # タイムアウト防止
-                break
-            tried += 1
-            # 既存と重複チェック
-            if any(kw in name for name, _ in items):
-                continue
-            summary = fetch_wikipedia_summary(kw)
-            if not summary:
-                continue
-            point = extract_trivia_point(summary, kw)
-            if not point:
-                continue
-            # キーワードが短すぎる場合は記事名を補完
+    tried = 0
+    for kw in trends:
+        if len(items) >= max_items:
+            break
+        if tried >= 15:
+            break
+        tried += 1
+        summary = fetch_wikipedia_summary(kw)
+        desc = _make_readable(kw, summary)
+        if desc:
+            # 名前はキーワードそのまま（12文字上限）
             name = kw if len(kw) <= 12 else kw[:12] + '…'
-            items.append((name, point))
-            print(f'    ✅ [{kw}] → {point[:30]}...')
+            if add(name, desc):
+                print(f'    ✅ [{name}] {desc[:30]}')
 
-    # ── C. Wikipedia 注目記事（件数が足りない場合の補完） ────────
+    # ── C. Wikipedia 秀逸記事で補完 ───────────────────────────
     if len(items) < max_items:
-        print(f'  📚 Wikipedia注目記事で補完中（残り{max_items - len(items)}件）...')
-        featured = fetch_wikipedia_random_featured(n=15)
-        sources_used.append('Wikipedia 注目記事')
-        for title in featured:
+        print(f'  📚 Wikipedia秀逸記事で補完中...')
+        for title in fetch_wikipedia_random_featured(n=20):
             if len(items) >= max_items:
                 break
-            if any(title in name for name, _ in items):
-                continue
             summary = fetch_wikipedia_summary(title)
-            if not summary:
-                continue
-            point = extract_trivia_point(summary, title)
-            if not point:
-                continue
-            name = title if len(title) <= 12 else title[:12] + '…'
-            items.append((name, point))
+            desc = _make_readable(title, summary)
+            if desc:
+                name = title if len(title) <= 12 else title[:12] + '…'
+                add(name, desc)
 
-    # ── D. フォールバック（それでも足りない場合） ──────────────
+    # ── D. フォールバック固定プール ───────────────────────────
     if len(items) < max_items:
-        print(f'  🔒 フォールバック補完...')
-        fallback = _get_fallback_pool()
+        print(f'  🔒 フォールバック補完（現在{len(items)}件）...')
         rng = random.Random(NOW.strftime('%Y-%m-%d-fb'))
-        rng.shuffle(fallback)
-        for fb in fallback:
+        pool = _get_fallback_pool()
+        rng.shuffle(pool)
+        for name, reason in pool:
             if len(items) >= max_items:
                 break
-            items.append(fb)
-
-    # ランキング確定（max_items件）
-    items = items[:max_items]
-
-    # タイトル・ハッシュタグ
-    month = NOW.month
-    day = NOW.day
-    title = f'{month}月{day}日 今日のホット雑学'
-
-    hashtags = (
-        '#雑学 #今日の雑学 #豆知識 #トリビア #知ってた '
-        '#雑学ランキング #面白い #Googleトレンド #話題 #今日の話題'
-    )
-    footer_question = 'どれが一番「へぇ」でしたか？コメントで！'
+            add(name, reason)
 
     return {
-        'title': title,
-        'items': items,
-        'hashtags': hashtags,
-        'footer_question': footer_question,
-        'sources': list(dict.fromkeys(sources_used)),  # 重複除去
+        'title': f'{NOW.month}月{NOW.day}日 今日のホット雑学',
+        'items': items[:max_items],
+        'hashtags': (
+            '#雑学 #今日の雑学 #豆知識 #トリビア #知ってた '
+            '#雑学ランキング #面白い #Googleトレンド #話題 #今日の話題'
+        ),
+        'footer_question': 'どれが一番「へぇ」でしたか？コメントで！',
+        'sources': [],
     }
 
 
 # ================================================================
-# 🔒 フォールバック固定プール
+# 🔒 フォールバック固定プール（すべて主語付きの完全な1文）
 # ================================================================
 
 def _get_fallback_pool():
-    """ネット取得失敗時の保険用固定雑学プール。"""
+    """ネット取得失敗時の保険用固定雑学プール。すべて単体で意味が通じる文。"""
     return [
-        ('バナナの分類',     'バナナは植物学的には「ベリー」に分類される。'),
-        ('蜂蜜の保存性',     '適切に保存すれば数千年経っても食べられる。'),
-        ('タコの脳',         '脳が9つあり各足にも小さな脳がある。'),
-        ('まばたき回数',     '人間は1日に約1万5000〜2万回まばたきする。'),
-        ('月の後退',         '月は1年に約3.8cmずつ地球から遠ざかっている。'),
-        ('骨の数の変化',     '赤ちゃん300個→成長で206個に自然に癒合する。'),
-        ('ハチドリの飛行',   '唯一後ろ向きに飛べる鳥として知られる。'),
-        ('りんごと水',       '果肉の約25%が空気で水に浮かぶ。'),
-        ('雷の温度',         '雷の温度は太陽の表面より高くなることがある。'),
-        ('カンガルー',       '構造上、後ろ向きに歩くことができない。'),
-        ('富士山',           '現在も活火山に分類されている。'),
-        ('ゾウの自己認識',   '鏡に映った自分を認識できる数少ない動物。'),
-        ('コアラの指紋',     '人間とほぼ区別がつかないほど似ている。'),
-        ('雪の結晶',         '同じ形の結晶は世界に二つと存在しない。'),
-        ('心臓の拍動数',     '一生で約20億回拍動するといわれる。'),
+        ('バナナの分類',   'バナナは植物学的には「ベリー」に分類される。'),
+        ('蜂蜜の保存性',   '蜂蜜は適切に保存すれば数千年経っても腐らない。'),
+        ('タコの脳',       'タコには脳が9つあり、各足にも神経節がある。'),
+        ('まばたきの回数', '人間は1日に約1万5千〜2万回まばたきする。'),
+        ('月の後退速度',   '月は毎年約3.8cmずつ地球から遠ざかっている。'),
+        ('人間の骨の数',   '赤ちゃんの骨は約300本あるが、成長で206本に減る。'),
+        ('ハチドリの飛行', 'ハチドリは鳥類で唯一、後ろ向きに飛べる。'),
+        ('りんごの浮力',   'りんごは果肉の約25%が空気のため水に浮かぶ。'),
+        ('雷の温度',       '雷の温度は太陽の表面温度の約5倍に達する。'),
+        ('カンガルーの歩行','カンガルーは体の構造上、後ろに歩けない。'),
+        ('富士山の状態',   '富士山は現在も活火山に分類されている。'),
+        ('ゾウの自己認識', 'ゾウは鏡で自分を認識できる数少ない動物の一つ。'),
+        ('コアラの指紋',   'コアラの指紋は人間のものとほぼ区別がつかない。'),
+        ('雪の結晶',       '雪の結晶は同じ形のものが二つと存在しない。'),
+        ('心臓の拍動数',   '人間の心臓は一生で約20億回拍動するといわれる。'),
+        ('脳の消費量',     '脳は体重の約2%だが全エネルギーの約20%を消費する。'),
+        ('南極の分類',     '南極大陸は降水量が極めて少なく砂漠に分類される。'),
+        ('イルカの睡眠',   'イルカは脳の左右を交互に休ませながら泳ぎ続ける。'),
+        ('ラクダのこぶ',   'ラクダのこぶの中身は水ではなく脂肪が蓄積している。'),
+        ('チーターの加速', 'チーターは約3秒で時速100kmに達する地上最速の動物。'),
     ]
 
-
-# ================================================================
-# 🚀 単体テスト用
-# ================================================================
 
 if __name__ == '__main__':
     print('=== ホット雑学ランキング取得テスト ===')
     result = build_hot_trivia_ranking()
     print(f'\n📌 タイトル: {result["title"]}')
-    print(f'📡 ソース: {", ".join(result["sources"])}')
-    print()
+    print(f'📊 取得件数: {len(result["items"])}件\n')
     for i, (name, reason) in enumerate(result['items'], 1):
         print(f'{i:2}位: {name}')
         print(f'      → {reason}')
